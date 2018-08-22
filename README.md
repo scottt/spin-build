@@ -12,7 +12,8 @@ You'll need to have:
 * `byacc`, `bison`, `flex`, `make`, `gcc` packages installed to build [Spin](http://spinroot.com/spin/Man/README.html#S1) and [Modex](http://spinroot.com/modex/).
 
 You'll further need:
-* `graphviz` and Tcl/Tk to run `ispin` and `tau
+* `graphviz` and Tcl/Tk to run `ispin` and `tau`
+ * `tau` needs GNU `awk` instead of the one shipped with MacOS (`brew install gawk`)
 * a graphical Java environment to run `jspin`
 
 ## Rationale
