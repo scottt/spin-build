@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+
+import sys
+import os
+import subprocess
+import argparse
+
+def self_path_to_jspin_dir():
+    self_path = os.path.realpath(sys.argv[0])
+    # X/bin/jspin -> X
+    prefix_dir = self_path
+    prefix_dir = os.path.split(prefix_dir)[0]
+    prefix_dir = os.path.split(prefix_dir)[0]
+    return os.path.join(prefix_dir, 'share', 'jspin')
+
+main_function_map = {}
+
+def main_function(f):
+    global main_function_map
+    main_function_map[f.__name__.replace('_', '-')] = f
+    return f
+
+@main_function
+def filter_spin():
+    description = 'launch filter-spin from jSpin to filter output from the Spin model checker'
+    args = sys.argv[1:]
+    for i, s in enumerate(args):
+        if not s.startswith('-'):
+            args[i] = os.path.realpath(s)
+    jspin_dir = self_path_to_jspin_dir()
+    r = subprocess.call(['java', '-cp', 'jspin.jar', 'filterSpin.FilterSpin'] + args, cwd=jspin_dir)
+    sys.exit(r)
+
+@main_function
+def spin_spider():
+    description='launch spin-spider from jSpin to generate graphs from Promela sources'
+    args = sys.argv[1:]
+    for i, s in enumerate(args):
+        if not s.startswith('-'):
+            args[i] = os.path.realpath(s)
+    jspin_dir = self_path_to_jspin_dir()
+    r = subprocess.call(['java', '-cp', 'jspin.jar', 'spinSpider.SpinSpider'] + args, cwd=jspin_dir)
+    sys.exit(r)
+
+@main_function
+def jspin():
+    description='launch jSpin GUI for the Spin model checker'
+    args = sys.argv[1:]
+    for i, s in enumerate(args):
+        if not s.startswith('-'):
+            args[i] = os.path.realpath(s)
+    jspin_dir = self_path_to_jspin_dir()
+    r = subprocess.call(['java', '-jar', 'jspin.jar'] + args, cwd=jspin_dir)
+    sys.exit(r)
+
+if __name__ == '__main__':
+    command_name = os.path.basename(sys.argv[0])
+    try:
+        main = main_function_map[command_name]
+    except KeyError:
+        sys.stderr.write('%r is not a known commandname. Try one of: %r\n' %
+                (command_name, list(main_function_map.keys())))
+        sys.exit(2)
+    main()

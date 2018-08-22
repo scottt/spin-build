@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+
+MSG = '''Download, build and install the Spin and Modex modek checkers.
+
+SYNOPSIS
+$ spin-build               # installs into $HOME/spin
+$ spin-build -d /opt/spin  # installs into /opt/spin
+'''
+
+# http://spinroot.com/spin/Src/index.html
+SPIN_SRC_URL = 'http://spinroot.com/spin/Src/spin648.tar.gz'
+SPIN_SHA256 = '0035bb114157a759e047c7f94ede0a3d7149003893914c9bbdff45e074ab6ae7'
+# http://spinroot.com/modex/
+MODEX_SRC_URL = 'http://spinroot.com/modex/modex2.10.tar.gz'
+MODEX_SHA256 = '9aeb7b70de3a2e521c301b2fb554a38d6312c73edb5526c83afd4923120fe4c7'
+# http://www.spinroot.com/swarm/
+SWARM_SRC_URL = 'http://www.spinroot.com/swarm/swarm3.2.tar.gz'
+SWARM_SHA256 = '5c336b03f925f5d359bacee36089fa278315e02bef60b52698ef88b781eb96b4'
+# https://code.google.com/archive/p/jspin/downloads
+JSPIN_SRC_URL = 'https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/jspin/jspin-5-0.zip'
+JSPIN_SHA256 = '185e2ec6790b8694134995d41b0787443714c72c4f5bb56a62b8f35c48032802'
+# https://authors.library.caltech.edu/56038/
+TAU_SRC_URL = 'https://authors.library.caltech.edu/56038/1/tau_v03.tar.gz'
+TAU_SHA256 = '5c54902170b67a974fe74680d3b286329cb422e444ed60bf2892fefa5c79e7c2'
+
+URLS_AND_CHECKSUMS = [
+    (SPIN_SRC_URL, SPIN_SHA256),
+    (MODEX_SRC_URL, MODEX_SHA256),
+    (SWARM_SRC_URL, SWARM_SHA256),
+    (JSPIN_SRC_URL, JSPIN_SHA256),
+    (TAU_SRC_URL, TAU_SHA256),
+]
+
+import sys
+import os
+import hashlib
+import subprocess
+import argparse
+import getpass
+import glob
+import shutil
+import re
+
+# DOWNLOAD_CACHE_DIR: $HOME/packages/opensource
+DOWNLOAD_CACHE_DIR = os.path.join(os.path.expanduser('~'), 'packages', 'opensource')
+
+def download(url, dest_dir):
+    subprocess.check_call(['wget', '-P', dest_dir, '-N', url])
+
+def url_filename(url):
+    bname = os.path.basename(url)
+    return os.path.join(DOWNLOAD_CACHE_DIR, bname)
+
+def url_get(url, hash_digest, dest_dir):
+    cache_fname = url_filename(url)
+    try:
+        f = open(cache_fname, 'rb')
+    except OSError:
+        download(url, dest_dir)
+        f = open(cache_fname, 'rb')
+    m = hashlib.sha256()
+    data = bytearray(m.block_size)
+    r = None
+    while r != 0:
+        r = f.readinto(data)
+        m.update(data[:r])
+    if m.hexdigest() != hash_digest:
+        sys.stderr.write('file corrupt: %r\nsha256 mismatch:\nfile:   %r\ncorrect:%r\n' % (
+            cache_fname, m.hexdigest(), hash_digest))
+        raise ValueError
+
+def tarball_extract(fname, dest_dir=None):
+    'extract @fname to CWD or @dest_dir if supplied'
+    # spin and modex tarballs are weird, GNU tar can't auto detect them as tarballs or auto detect
+    # the compression algorithm used.
+    fname1, ext = os.path.splitext(fname)
+    if ext == '.gz':
+        subprocess.check_call(['gunzip', '-f', '--keep', fname])
+    else:
+        fname1 = fname
+    cmd = ['tar']
+    if dest_dir is not None:
+         cmd.extend(['-C', dest_dir])
+    cmd.extend(['-xf', fname1])
+    subprocess.check_call(cmd)
+
+def extracted_dirname(fname):
+    '''spin.tar.gz -> spin
+    modex2.10.tar.gz -> modex
+    '''
+    bname = os.path.basename(fname)
+    name = bname[:bname.find('.')]
+    m = re.compile(r'(.*)[0-9]+').match(name)
+    if m is None:
+        return name
+    else:
+        return m.groups()[0]
+
+def do_spin_build(ncpu, dest_dir):
+    # tarball's toplevel directory doesn't match the tarball name
+    extracted_dir = 'Spin'
+    src_dir = glob.glob(os.path.join('Spin', 'Src*'))[0]
+    try:
+        subprocess.check_call(['make', '-j%d' % (ncpu,)], cwd=src_dir)
+    except subprocess.CalledProcessError:
+        sys.stderr.write('\n\n%s: install byacc, gcc, glibc-headers, make to build Spin.\n' % (program_name(),))
+        raise
+    return src_dir
+
+def template_gen(template_path, dest_dir, data, dest_basename=None):
+    if dest_basename is None:
+        dest_path = os.path.join(dest_dir, template_path[:template_path.rindex('.')])
+    else:
+        dest_path = os.path.join(dest_dir, dest_basename)
+    with open(dest_path, 'w') as f:
+        f.write(open(template_path).read().format_map(data))
+
+def spin_install(src_dir, dest_dir):
+    # NOTE: src_dir points to Spin/Src"$version" not Spin
+    bin_dir = os.path.join(dest_dir, 'bin')
+    share_dir = os.path.join(dest_dir, 'share')
+    man_dir = os.path.join(share_dir, 'man')
+    d = dict(bin_dir=bin_dir, share_dir=share_dir, man_dir=man_dir)
+
+    os.makedirs(bin_dir, exist_ok=True)
+    shutil.copy2(os.path.join(src_dir, 'spin'), bin_dir)
+
+    ispin_dest = os.path.join(bin_dir, 'ispin')
+    shutil.copy2(os.path.join('Spin', 'iSpin', 'ispin.tcl'), ispin_dest)
+    os.chmod(ispin_dest, 0o755)
+ 
+    man1_dir = os.path.join(man_dir, 'man1')
+    os.makedirs(man1_dir, exist_ok=True)
+    shutil.copy2(os.path.join('Spin', 'Man', 'spin.1'), man1_dir)
+
+    template_gen('spin.env.template', os.path.join(dest_dir), d)
+
+def modex_build(ncpu, dest_dir):
+    src_dir = glob.glob(os.path.join('modex', 'Src*'))[0]
+
+    # parallel build is broken for modex
+    # mv gram.tab.c gram.c
+    # mv: cannot stat 'gram.tab.c': No such file or directory
+
+    # See DEFAULT_LUT in {makefile,xtract.c}
+    modex_share_dir = os.path.join(dest_dir, 'share', 'modex')
+    try:
+        subprocess.check_call(['make', r'CPPFLAGS=-DDEFAULT_LUT=\"%s\"' %
+            (os.path.join(modex_share_dir, 'defaults.lut'),)], cwd=src_dir)
+    except subprocess.CalledProcessError:
+        sys.stderr.write('\n\n%s: install bison, flex, gcc, glibc-headers, make to build Modex.\n' % (program_name(),))
+        raise
+    return src_dir
+
+def modex_install(src_dir, dest_dir):
+    bin_dir = os.path.join(dest_dir, 'bin')
+    shutil.copy2(os.path.join(src_dir, 'modex'), bin_dir)
+
+    modex_share_dir = os.path.join(dest_dir, 'share', 'modex')
+    os.makedirs(modex_share_dir, exist_ok=1)
+    shutil.copy2(os.path.join(src_dir, 'defaults.lut'), modex_share_dir)
+
+    shutil.copy2(os.path.join('modex', 'Scripts', 'verify'), bin_dir)
+
+def swarm_build(ncpu, dest_dir):
+    src_dir = 'swarm'
+    
+    try:
+        subprocess.check_call(['make', '-j%d' % (ncpu,)], cwd=src_dir)
+    except subprocess.CalledProcessError:
+        sys.stderr.write('\n\n%s: install gcc, glibc-headers, make to build swarm.\n' % (program_name(),))
+        raise
+    return src_dir
+
+def swarm_install(src_dir, dest_dir):
+    bin_dir = os.path.join(dest_dir, 'bin')
+    share_dir = os.path.join(dest_dir, 'share')
+    man_dir = os.path.join(share_dir, 'man')
+
+    os.makedirs(bin_dir, exist_ok=True)
+    shutil.copy2(os.path.join(src_dir, 'swarm'), bin_dir)
+
+    man1_dir = os.path.join(man_dir, 'man1')
+    os.makedirs(man1_dir, exist_ok=True)
+    shutil.copy2(os.path.join(src_dir, 'swarm.1'), man1_dir)
+
+def jspin_install(dest_dir):
+    bin_dir = os.path.join(dest_dir, 'bin')
+    share_dir = os.path.join(dest_dir, 'share')
+    jspin_share_dir = os.path.join(share_dir, 'jspin')
+    d = dict(bin_dir=bin_dir, share_dir=share_dir, jspin_share_dir=jspin_share_dir)
+
+    os.makedirs('jspin', exist_ok=1)
+    # jspin zipfile has no toplevel directory
+    subprocess.check_call(['unzip',
+        '-qq', # quiet
+        '-o', # overwrite
+        url_filename(JSPIN_SRC_URL)], cwd='jspin')
+
+    shutil.rmtree(jspin_share_dir, ignore_errors=1)
+    os.makedirs(jspin_share_dir, exist_ok=1)
+    shutil.copy2(os.path.join('jspin', 'jspin.jar'), jspin_share_dir)
+    shutil.copytree(os.path.join('jspin', 'jspin-examples'), os.path.join(jspin_share_dir, 'jspin-examples'))
+    shutil.copytree(os.path.join('jspin', 'spider-examples'), os.path.join(jspin_share_dir, 'spider-examples'))
+
+    template_gen('jspin-config.cfg.template', jspin_share_dir, d, dest_basename='config.cfg')
+
+    shutil.copy2(os.path.join('bin', 'jspin'), bin_dir)
+    try:
+        os.unlink(os.path.join(bin_dir, 'spin-spider'))
+        os.unlink(os.path.join(bin_dir, 'filter-spin'))
+    except FileNotFoundError:
+        pass
+    shutil.copy2(os.path.join('bin', 'spin-spider'), bin_dir, follow_symlinks=0)
+    shutil.copy2(os.path.join('bin', 'filter-spin'), bin_dir, follow_symlinks=0)
+
+def tau_install(dest_dir):
+    bin_dir = os.path.join(dest_dir, 'bin')
+    share_dir = os.path.join(dest_dir, 'share')
+    tau_share_dir = os.path.join(share_dir, 'tau')
+
+    os.makedirs(tau_share_dir, exist_ok=1)
+    # tarballs toplevel dir doesn't batch tarball name
+    # e.g. tau_v03.tar.gz -> Tau
+    tarball_extract(url_filename(TAU_SRC_URL))
+
+    shutil.copy2(os.path.join('Tau', 'tau.tcl'), os.path.join(bin_dir, 'tau'))
+    shutil.copy2(os.path.join('Tau', 't2s'), bin_dir)
+    # rmtree on dest to make copytree happy
+    examples_dir = os.path.join(tau_share_dir, 'Examples')
+    shutil.rmtree(examples_dir, ignore_errors=1)
+    shutil.copytree(os.path.join('Tau', 'Examples'), examples_dir, symlinks=1)
+
+main_function_map = {}
+
+def main_function(func):
+    global main_function_map
+    main_function_map[func.__name__.replace('_','-')] = func
+    return func
+
+@main_function
+def spin_build():
+    parser = argparse.ArgumentParser(description='build and install spin and modex')
+    parser.add_argument('-d', '--dest-dir', help='destination direcotry',
+        default=os.path.join(os.path.expanduser('~'), 'spin'))
+    args = parser.parse_args()
+
+    for (url, hash_digest) in URLS_AND_CHECKSUMS:
+        try:
+            url_get(url, hash_digest, DOWNLOAD_CACHE_DIR)
+        except ValueError:
+            sys.exit(2)
+
+    spin_fname = url_filename(SPIN_SRC_URL)
+    tarball_extract(spin_fname)
+    ncpu = int(subprocess.Popen(['getconf', '_NPROCESSORS_ONLN'],
+                           stdout=subprocess.PIPE).stdout.read())
+    dest_dir = args.dest_dir
+    try:
+        src_dir = do_spin_build(ncpu, dest_dir)
+    except subprocess.CalledProcessError:
+        sys.exit(2)
+    spin_install(src_dir, dest_dir)
+
+    modex_fname = url_filename(MODEX_SRC_URL)
+    # modex tarballs lack a toplevel directory
+    modex_src_dir = extracted_dirname(MODEX_SRC_URL)
+    os.makedirs(modex_src_dir, exist_ok=1)
+    tarball_extract(url_filename(MODEX_SRC_URL), dest_dir=modex_src_dir) 
+    try:
+        src_dir = modex_build(ncpu, dest_dir)
+    except subprocess.CalledProcessError:
+        sys.exit(2)
+    modex_install(src_dir, dest_dir)
+
+    swarm_src_dir = 'swarm'
+    os.makedirs(swarm_src_dir, exist_ok=1)
+    tarball_extract(url_filename(SWARM_SRC_URL), dest_dir=swarm_src_dir) 
+    try:
+        src_dir = swarm_build(ncpu, dest_dir)
+    except subprocess.CalledProcessError:
+        sys.exit(2)
+    swarm_install(src_dir, dest_dir)
+
+    jspin_install(dest_dir)
+    tau_install(dest_dir)
+
+    spin_env_path = os.path.join(dest_dir, 'spin.env')
+    with open(spin_env_path) as f:
+        spin_env_str = f.read()
+
+    sys.stderr.write('\n\n%s: installed spin, ispin, jspin, modex, and tau in %s\n\n'
+            'Add this to your .bashrc or equivalent:\nsource %s\n\nContent of %r:\n%s'
+            % (program_name(), dest_dir, spin_env_path, spin_env_path, spin_env_str))
+
+@main_function
+def spin_clean():
+    parser = argparse.ArgumentParser(description="Cleanup after 'spin-build'. "
+                                                 "Remove build and source directories.")
+    args = parser.parse_args()
+    shutil.rmtree('Spin', ignore_errors=1)
+    shutil.rmtree('modex', ignore_errors=1)
+    shutil.rmtree('jspin', ignore_errors=1)
+    shutil.rmtree('Tau', ignore_errors=1)
+
+def main_function_dispatch(name):
+    try:
+        f = main_function_map[name]
+    except KeyError:
+        sys.stderr.write('%s is not a valid command name\n' % (name,))
+        sys.exit(2)
+    f()
+
+def program_name():
+    return os.path.basename(sys.argv[0])
+
+if __name__ == '__main__':
+    main_function_dispatch(program_name())
