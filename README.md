@@ -7,10 +7,16 @@ $ ./spin-build             # installs spin, modex and friends in $HOME/spin
 $ ./spin-build /opt/spin   # installs in specified path
 $ ./spin-clean             # clean sources extracted in current working directory
 ```
+This script itself requires [Python 3](PYTHON3-INSTALLATION.md) to run.
 
 Sample Session:
 ```
+$ git clone https://github.com/scottt/spin-build
+$ cd spin-build
 $ ./spin-build
+
+(...)
+
 spin-build: installed spin, ispin, jspin, modex, and tau in /home/scottt/spin
 
 Add this to your .bashrc or equivalent:

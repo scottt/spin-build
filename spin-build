@@ -43,6 +43,12 @@ import re
 import urllib.request
 import ssl
 
+try:
+    __builtins__.FileNotFoundError
+except AttributeError:
+    class FileNotFoundError(OSError):
+        pass
+
 # DOWNLOAD_CACHE_DIR: $HOME/packages/opensource
 DOWNLOAD_CACHE_DIR = os.path.join(os.path.expanduser('~'), 'packages', 'opensource')
 
@@ -52,17 +58,23 @@ def download(url, dest_dir):
     fname = url_filename(url)
     req = urllib.request.Request(url, headers={'User-Agent' : 'Mozilla'})
     sys.stderr.write('url: %s\n' % (url,))
-    ctx = ssl.create_default_context()
-    ctx.check_hostname =False
-    ctx.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(req, context=ctx) as r:
-        with open(os.path.join(dest_dir, fname), 'wb') as f:
-            b = None
-            while b != b'':
-                b = r.read(512)
-                sys.stderr.write('#'); sys.stderr.flush()
-                f.write(b)
-            sys.stderr.write('\n')
+    try:
+        ctx = ssl.create_default_context()
+    except AttributeError:
+        r = urllib.request.urlopen(req)
+    else:
+        ctx.check_hostname =False
+        ctx.verify_mode = ssl.CERT_NONE
+        r = urllib.request.urlopen(req, context=ctx)
+
+    with open(os.path.join(dest_dir, fname), 'wb') as f:
+        b = None
+        while b != b'':
+            b = r.read(512)
+            sys.stderr.write('#'); sys.stderr.flush()
+            f.write(b)
+        sys.stderr.write('\n')
+    r.close()
 
 def url_filename(url):
     bname = os.path.basename(url)
@@ -72,7 +84,7 @@ def url_get(url, hash_digest, dest_dir):
     cache_fname = url_filename(url)
     try:
         f = open(cache_fname, 'rb')
-    except OSError:
+    except (OSError, IOError):
         download(url, dest_dir)
         f = open(cache_fname, 'rb')
     m = hashlib.sha256()
@@ -149,7 +161,7 @@ def do_spin_build(ncpu, dest_dir):
     src_dir = glob.glob(os.path.join('Spin', 'Src*'))[0]
     try:
         subprocess.check_call(['make', '-j%d' % (ncpu,)], cwd=src_dir)
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (FileNotFoundError, OSError, subprocess.CalledProcessError):
         sys.stderr.write('ERROR: %s: missing build dependencies\n\n' % (program_name(),))
         if 0:
             sys.stderr.write('\n\n%s: install byacc, gcc, glibc-headers, make to build Spin.\n' % (program_name(),))
@@ -265,10 +277,14 @@ def jspin_install(dest_dir):
     try:
         os.unlink(os.path.join(bin_dir, 'spin-spider'))
         os.unlink(os.path.join(bin_dir, 'filter-spin'))
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         pass
-    shutil.copy2(os.path.join('bin', 'spin-spider'), bin_dir, follow_symlinks=0)
-    shutil.copy2(os.path.join('bin', 'filter-spin'), bin_dir, follow_symlinks=0)
+    try:
+        shutil.copy2(os.path.join('bin', 'spin-spider'), bin_dir, follow_symlinks=0)
+        shutil.copy2(os.path.join('bin', 'filter-spin'), bin_dir, follow_symlinks=0)
+    except TypeError:
+        shutil.copy2(os.path.join('bin', 'spin-spider'), bin_dir)
+        shutil.copy2(os.path.join('bin', 'filter-spin'), bin_dir)
 
 def tau_install(dest_dir):
     bin_dir = os.path.join(dest_dir, 'bin')
@@ -314,7 +330,7 @@ def spin_build():
     dest_dir = args.dest_dir
     try:
         src_dir = do_spin_build(ncpu, dest_dir)
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (FileNotFoundError, OSError, subprocess.CalledProcessError):
         sys.exit(2)
     spin_install(src_dir, dest_dir)
 
