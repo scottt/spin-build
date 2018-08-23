@@ -40,12 +40,29 @@ import getpass
 import glob
 import shutil
 import re
+import urllib.request
+import ssl
 
 # DOWNLOAD_CACHE_DIR: $HOME/packages/opensource
 DOWNLOAD_CACHE_DIR = os.path.join(os.path.expanduser('~'), 'packages', 'opensource')
 
 def download(url, dest_dir):
-    subprocess.check_call(['wget', '-P', dest_dir, '-N', url])
+    #subprocess.check_call(['wget', '-P', dest_dir, '-N', url])
+    os.makedirs(dest_dir, exist_ok=1)
+    fname = url_filename(url)
+    req = urllib.request.Request(url, headers={'User-Agent' : 'Mozilla'})
+    sys.stderr.write('url: %s\n' % (url,))
+    ctx = ssl.create_default_context()
+    ctx.check_hostname =False
+    ctx.verify_mode = ssl.CERT_NONE
+    with urllib.request.urlopen(req, context=ctx) as r:
+        with open(os.path.join(dest_dir, fname), 'wb') as f:
+            b = None
+            while b != b'':
+                b = r.read(512)
+                sys.stderr.write('#'); sys.stderr.flush()
+                f.write(b)
+            sys.stderr.write('\n')
 
 def url_filename(url):
     bname = os.path.basename(url)
@@ -75,7 +92,10 @@ def tarball_extract(fname, dest_dir=None):
     # the compression algorithm used.
     fname1, ext = os.path.splitext(fname)
     if ext == '.gz':
-        subprocess.check_call(['gunzip', '-f', '--keep', fname])
+        # gunzip only gained --keep, -k in 1.6+
+        # Support gunzip 1.5 shipped in Centos7 here
+        with open(fname, 'rb') as fin, open(fname1, 'wb') as fout:
+            subprocess.check_call(['gunzip', '-f'], stdin=fin, stdout=fout)
     else:
         fname1 = fname
     cmd = ['tar']
@@ -96,14 +116,45 @@ def extracted_dirname(fname):
     else:
         return m.groups()[0]
 
+def prerequisites_print():
+    'Inform the user which packages to install to build and run the softare we\'re packaging'
+    o = linux_distro_detect()
+    if o == 'fedora':
+        fname = 'CENTOS7-PACKAGES'
+    else:
+        fname = 'UBUNTU18.04-PACKAGES'
+    with open(fname) as f:
+        data = f.read()
+        sys.stderr.write(data)
+
+def linux_distro_detect():
+    '->  "fedora" or "ubuntu" or "unknown"'
+    try:
+        # moden Linux 
+        with open('/etc/os-release') as f:
+            for l in f.readlines():
+                if (l.startswith('ID="centos') or
+                    l.startswith('ID="rhel') or
+                    l.startswith('ID="fedora')):
+                    return 'fedora'
+                elif (l.startswith('ID=ubuntu') or
+                      l.startswith('ID=debian')):
+                    return 'ubuntu'
+    except FileNotFoundError:
+        return 'unknown'
+
 def do_spin_build(ncpu, dest_dir):
     # tarball's toplevel directory doesn't match the tarball name
     extracted_dir = 'Spin'
     src_dir = glob.glob(os.path.join('Spin', 'Src*'))[0]
     try:
         subprocess.check_call(['make', '-j%d' % (ncpu,)], cwd=src_dir)
-    except subprocess.CalledProcessError:
-        sys.stderr.write('\n\n%s: install byacc, gcc, glibc-headers, make to build Spin.\n' % (program_name(),))
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        sys.stderr.write('ERROR: %s: missing build dependencies\n\n' % (program_name(),))
+        if 0:
+            sys.stderr.write('\n\n%s: install byacc, gcc, glibc-headers, make to build Spin.\n' % (program_name(),))
+        else:
+            prerequisites_print()
         raise
     return src_dir
 
@@ -192,10 +243,15 @@ def jspin_install(dest_dir):
 
     os.makedirs('jspin', exist_ok=1)
     # jspin zipfile has no toplevel directory
-    subprocess.check_call(['unzip',
-        '-qq', # quiet
-        '-o', # overwrite
-        url_filename(JSPIN_SRC_URL)], cwd='jspin')
+    try:
+        subprocess.check_call(['unzip',
+            '-qq', # quiet
+            '-o', # overwrite
+            url_filename(JSPIN_SRC_URL)], cwd='jspin')
+    except FileNotFoundError:
+        # Assume unzip not installed
+        prerequisites_print()
+        raise
 
     shutil.rmtree(jspin_share_dir, ignore_errors=1)
     os.makedirs(jspin_share_dir, exist_ok=1)
@@ -258,7 +314,7 @@ def spin_build():
     dest_dir = args.dest_dir
     try:
         src_dir = do_spin_build(ncpu, dest_dir)
-    except subprocess.CalledProcessError:
+    except (FileNotFoundError, subprocess.CalledProcessError):
         sys.exit(2)
     spin_install(src_dir, dest_dir)
 
@@ -282,16 +338,19 @@ def spin_build():
         sys.exit(2)
     swarm_install(src_dir, dest_dir)
 
-    jspin_install(dest_dir)
+    try:
+        jspin_install(dest_dir)
+    except FileNotFoundError:
+        sys.exit(2)
     tau_install(dest_dir)
 
     spin_env_path = os.path.join(dest_dir, 'spin.env')
     with open(spin_env_path) as f:
         spin_env_str = f.read()
 
-    sys.stderr.write('\n\n%s: installed spin, ispin, jspin, modex, and tau in %s\n\n'
-            'Add this to your .bashrc or equivalent:\nsource %s\n\nContent of %r:\n%s'
-            % (program_name(), dest_dir, spin_env_path, spin_env_path, spin_env_str))
+    sys.stderr.write('\n\n%(program_name)s: installed spin, ispin, jspin, modex, and tau in %(dest_dir)s\n\n'
+            'Add this to your .bashrc or equivalent:\n  source %(spin_env_path)s\n\n' % 
+            dict(program_name=program_name(), dest_dir=dest_dir, spin_env_path=spin_env_path))
 
 @main_function
 def spin_clean():
@@ -300,6 +359,7 @@ def spin_clean():
     args = parser.parse_args()
     shutil.rmtree('Spin', ignore_errors=1)
     shutil.rmtree('modex', ignore_errors=1)
+    shutil.rmtree('swarm', ignore_errors=1)
     shutil.rmtree('jspin', ignore_errors=1)
     shutil.rmtree('Tau', ignore_errors=1)
 

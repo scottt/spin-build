@@ -8,6 +8,21 @@ $ ./spin-build /opt/spin   # installs in specified path
 $ ./spin-clean             # clean sources extracted in current working directory
 ```
 
+Sample Session:
+```
+$ ./spin-build
+spin-build: installed spin, ispin, jspin, modex, and tau in /home/scottt/spin
+
+Add this to your .bashrc or equivalent:
+  source /home/scottt/spin/spin.env
+
+$ source $HOME/spin.env
+$ printf 'init { printf("hello\\n") }' > hello.pml
+$ spin hello.pml 
+      hello
+1 process created
+```
+
 You'll need to have:
 * `byacc`, `bison`, `flex`, `make`, `gcc` packages installed to build [Spin](http://spinroot.com/spin/Man/README.html#S1) and [Modex](http://spinroot.com/modex/).
 

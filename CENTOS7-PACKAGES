@@ -1,0 +1,9 @@
+The centos7 packages required to build Spin and Modex are:
+	unzip flex byacc bison gcc glibc-headers make tk
+(strictly speaking 'tk' is for running the 'ispin' GUI)
+
+To run the jspin GUI:
+	java-1.8.0-openjdk
+(On more recent systems, try 'java-openjdk')
+
+Install the equivalent packages for your system. Try brew if you're on MacOS.

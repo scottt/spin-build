@@ -1,0 +1,8 @@
+The Ubuntu packages required to build Spin and Modex are:
+	unzip flex byacc bison build-essential tk 
+(strictly speaking 'tk' is for running the 'ispin' GUI)
+
+To run the jspin GUI:
+	default-jre
+
+Install the equivalent packages for your system. Try brew if you're on MacOS.
